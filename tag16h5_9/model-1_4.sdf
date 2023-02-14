@@ -1,0 +1,14 @@
+<?xml version="1.0" ?><sdf version="1.4">
+  <model name="tag16h5_9">
+    <static>true</static>
+    <link name="link">
+      <visual name="visual">
+        <geometry>
+          <mesh>
+            <uri>model://tag16h5_9/meshes/tag16h5_9.dae</uri>
+          <scale>0.44 0.44 0.44</scale></mesh>
+        </geometry>
+      </visual>
+    </link>
+  </model>
+</sdf>
