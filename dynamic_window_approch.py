@@ -47,7 +47,9 @@ class DynamicWindowApproch():
         list_W = dynamic_window[1]
         total_cost = 1e6
         best_velocity = [0, 0]
-        points_cloud=np.transpose(np.array(points_cloud, np.float32))
+        # points_cloud=np.transpose(np.array(points_cloud, np.float32))
+        points_cloud= np.array(points_cloud, np.float32)
+        
         for v in list_V:
             for w in list_W:
                 new_velocity = [v, w]
@@ -71,7 +73,7 @@ class DynamicWindowApproch():
         Args:
             pose (:obj:`list`): 机器人的2D位姿，(x,y,theta)，用list表达
             velocity (:obj:`list`): 用于计算代价的速度，[线速度，角速度]，用list表达
-            points_cloud (:obj:`list`): 障碍物点云，[[xi,yi]],用list表达
+            points_cloud (:obj:`list`): 障碍物点云，[[xi,yi]],用list表达(np.array)
 
         Returns:
             :obj:`double`: 当前位姿下选定速度造成的碰撞代价
@@ -80,13 +82,15 @@ class DynamicWindowApproch():
         time = 0.0
         min_r = 1e6
         pose_N = pose
+        # import pdb;pdb.set_trace()
         while (time < self.predict_time):
             pose_N = self.motion(pose_N, velocity, self.dt)
-            points_num = np.size(points_cloud, 1)
+            points_num = np.size(points_cloud, 0)
 
             for i in range(points_num):
                 distance = math.hypot(
-                    pose_N[0]-points_cloud[0, i], pose_N[1]-points_cloud[1, i])
+                    # pose_N[0]-points_cloud[0, i], pose_N[1]-points_cloud[1, i])
+                    pose_N[0]-points_cloud[i,0], pose_N[1]-points_cloud[i,1])
                 if (distance-self.base < 0):
                     return 1e6
 
@@ -181,7 +185,7 @@ class DynamicWindowApproch():
         Args:
             max_speed (:obj:`double`): 最大线速度.
             max_yawrate (:obj:`double`): 最大角速度，单位rad.
-            base (:obj:`double`): 机器人的半径.
+            base (:obj:`double`): 机器人的半径.p
             min_speed (:obj:`double`, optional): 最小线速度. Defaults to 0.
             max_accel (:obj:`double`, optional): 最大线加速度. Defaults to 15.0.
             max_dyawrate (:obj:`double`, optional): 最大角加速度. Defaults to np.radians(110.0).

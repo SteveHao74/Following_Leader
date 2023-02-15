@@ -11,9 +11,9 @@ from scipy.spatial.transform import Rotation as R
 #####param####
 extrinsic_matrix = np.array([[0,0,1,0],[-1,0,0,0],[0,-1,0,0],[0,0,0,1]]) #相机坐标系:z轴光轴,x右,y下
 cam_params = np.array([554.254691191187, 554.254691191187, 320.5, 240.5]) #fx, fy, cx, cy
-tag_len = 0.360
+tag_len = 0.2#0.360
 tag_family = 'tag36h11'
-track_distacne = 2
+track_distacne = 0.3
 
 #####initialize####
 robot2world =  np.identity(4)
@@ -40,10 +40,10 @@ def aprilTag_pose_estimate(img):
             obj2camera = M
             
             subgoal2camera = np.identity(4)
-            subgoal2camera[:3,0] =  -obj2camera[:3,0]
-            subgoal2camera[:3,1] =  obj2camera[:3,2]
-            subgoal2camera[:3,2] =  obj2camera[:3,1]
-            subgoal2camera[:3,3] =  obj2camera[:3,3] + obj2camera[:3,0] * track_distacne
+            subgoal2camera[:3,0] =  obj2camera[:3,2]
+            subgoal2camera[:3,1] =  -obj2camera[:3,0]
+            subgoal2camera[:3,2] =  -obj2camera[:3,1]
+            subgoal2camera[:3,3] =  obj2camera[:3,3] - obj2camera[:3,2] * track_distacne
 
             obj2world = camera2world.dot(obj2camera)
             subgoal2world = camera2world.dot(subgoal2camera)
@@ -52,10 +52,10 @@ def aprilTag_pose_estimate(img):
             print("obj2camera:\n", obj2camera)
             print("subgoal2robot:\n", camera2robot.dot(obj2camera))
 
-            subgoal2world = camera2robot.dot(obj2camera)
+            # subgoal2world = camera2robot.dot(subgoal2camera)
             subgoal = PoseStamped()
             subgoal.header.stamp = rospy.Time.now()
-            subgoal.header.frame_id = "robot_0_tf/base_link"#
+            subgoal.header.frame_id = "/robot_0_tf/odom"#
             subgoal.pose.position.x = subgoal2world[0,3]
             subgoal.pose.position.y = subgoal2world[1,3]
             subgoal.pose.position.z = subgoal2world[2,3]
