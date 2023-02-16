@@ -49,7 +49,7 @@ class DynamicWindowApproch():
         best_velocity = [0, 0]
         # points_cloud=np.transpose(np.array(points_cloud, np.float32))
         points_cloud= np.array(points_cloud, np.float32)
-        
+        # print("points_num",points_cloud)
         for v in list_V:
             for w in list_W:
                 new_velocity = [v, w]
@@ -58,6 +58,7 @@ class DynamicWindowApproch():
                 heading_cost = self.calculate_heading_cost(new_pose, goal)
                 clearance_cost = self.calculate_clearance_cost(
                     pose, new_velocity, points_cloud)
+                # print("clearance_cost",clearance_cost)
                 cost = velocity_cost+heading_cost+clearance_cost
 
                 if (cost < total_cost):
@@ -83,6 +84,7 @@ class DynamicWindowApproch():
         min_r = 1e6
         pose_N = pose
         # import pdb;pdb.set_trace()
+
         while (time < self.predict_time):
             pose_N = self.motion(pose_N, velocity, self.dt)
             points_num = np.size(points_cloud, 0)
@@ -91,6 +93,7 @@ class DynamicWindowApproch():
                 distance = math.hypot(
                     # pose_N[0]-points_cloud[0, i], pose_N[1]-points_cloud[1, i])
                     pose_N[0]-points_cloud[i,0], pose_N[1]-points_cloud[i,1])
+                
                 if (distance-self.base < 0):
                     return 1e6
 
@@ -99,6 +102,7 @@ class DynamicWindowApproch():
 
             time = time+self.dt
         clearance_cost = 1/(min_r+1e-6)
+
         return clearance_cost
 
     def calculate_heading_cost(self, pose, goal):
