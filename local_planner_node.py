@@ -147,15 +147,17 @@ if __name__ == "__main__":
         # print("tag_current_vel",cmd_vel_value.linear.x,cmd_vel_value.angular.z)
         # pub_tag_cmd_vel.publish(cmd_vel_value)
         # vel_vector = [0.1,0.1]
-        if np.linalg.norm(np.array(current_pose[:2])-np.array(sub_goal[:2]))< 1: 
+        if np.linalg.norm(np.array(current_pose[:2])-np.array(sub_goal[:2]))< 0.5: 
+            kp = 0.1
             cmd_vel_value.linear.x,cmd_vel_value.angular.z = 0,0
+            cmd_vel_value.angular.z = kp*(sub_goal[2] - current_pose[2]) 
         else:    
             
             vel_vector = DWA_Planner.planning(current_pose, current_vel, sub_goal[:2], points_cloud)
             cmd_vel_value.linear.x,cmd_vel_value.angular.z = vel_vector[0], vel_vector[1]
         pub_cmd_vel.publish(cmd_vel_value)
-        # print("sug_goal",sub_goal)
-        # print("cmd_vel_value",cmd_vel_value.linear.x,cmd_vel_value.angular.z)
-        print(points_cloud)
+        print("sug_goal",sub_goal)
+        print("cmd_vel_value",cmd_vel_value.linear.x,cmd_vel_value.angular.z)
+        # print(points_cloud)
         print("current_pose",current_pose,"current_vel",current_vel)
         rate.sleep()
