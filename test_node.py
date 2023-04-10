@@ -9,6 +9,7 @@ from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Twist
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import PointCloud2
+from sensor_msgs import point_cloud2
 from sensor_msgs.msg import PointField
 from dynamic_window_approch import DynamicWindowApproch
 
@@ -49,6 +50,17 @@ def global_points_publish(input_points_cloud):
     msg.data = np.asarray(input_points_cloud, np.float32).tostring()
 
     pub_points_cloud.publish(msg)
+
+def callback_obstacle_points(msg):
+    global points_cloud
+    temp = []
+    points = point_cloud2.read_points_list(msg, field_names=("x", "y", "z"))
+    num = len(points)
+    for i in range(num):
+        temp.append([points[i].x,points[i].y])
+    points_cloud = temp
+    print("shahao",num,points_cloud)
+
 
 
 def callback_laser(data):   
@@ -117,6 +129,7 @@ if __name__ == "__main__":
     rospy.Subscriber('/robot_0/scan', LaserScan, callback_laser, queue_size=1)
     rospy.Subscriber('/robot_0/odom', Odometry, callback_odom, queue_size=1)
     rospy.Subscriber('/subgoal', PoseStamped, callback_subgoal, queue_size=1)
+    rospy.Subscriber('pointcloud_topic', PointCloud2, callback_obstacle_points, queue_size=1)
 
     pub_cmd_vel = rospy.Publisher('/robot_0/cmd_vel', Twist, queue_size=10)
     pub_tag_cmd_vel = rospy.Publisher('/robot_tag/cmd_vel', Twist, queue_size=10)
@@ -141,6 +154,8 @@ if __name__ == "__main__":
     points_cloud = []
     #try:
     while not rospy.is_shutdown():
+        temp_points_cloud = np.ones((4,3))
+        global_points_publish(temp_points_cloud)
         # import pdb;pdb.set_trace()
         # cmd_vel_value.linear.x = rospy.get_param("/turtlebot_teleop_keyboard/scale_linear")
         # cmd_vel_value.angular.z = rospy.get_param("/turtlebot_teleop_keyboard/scale_angular")
@@ -152,11 +167,12 @@ if __name__ == "__main__":
             cmd_vel_value.linear.x,cmd_vel_value.angular.z = 0,0
             cmd_vel_value.angular.z = kp*(sub_goal[2] - current_pose[2]) 
         else:    
+            
             vel_vector = DWA_Planner.planning(current_pose, current_vel, sub_goal[:2], points_cloud)
             cmd_vel_value.linear.x,cmd_vel_value.angular.z = vel_vector[0], vel_vector[1]
         pub_cmd_vel.publish(cmd_vel_value)
-        print("sug_goal",sub_goal)
-        print("cmd_vel_value",cmd_vel_value.linear.x,cmd_vel_value.angular.z)
-        # print(points_cloud)
-        print("current_pose",current_pose,"current_vel",current_vel)
+        # print("sug_goal",sub_goal)
+        # print("cmd_vel_value",cmd_vel_value.linear.x,cmd_vel_value.angular.z)
+        # # print(points_cloud)
+        # print("current_pose",current_pose,"current_vel",current_vel)
         rate.sleep()
