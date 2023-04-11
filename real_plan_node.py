@@ -2,6 +2,7 @@ import rospy
 import math
 import numpy as np
 import cv2
+import open3d
 
 
 from sensor_msgs.msg import LaserScan
@@ -15,12 +16,12 @@ from dynamic_window_approch import DynamicWindowApproch
 from scipy.spatial.transform import Rotation as R
 
 ##global param
-track_distacne = 2
+track_distacne = 1
 camera_extrinsic_matrix = np.array([[0,0,1,0],[-1,0,0,0],[0,-1,0,0],[0,0,0,1]]) #相机坐标系:z轴光轴,x右,y下
 lidar_extrinsic_matrix = np.identity(4)
 robot2world =  np.identity(4)
 
-adjust_heading_threshold = 0.5
+adjust_heading_threshold = 0.2
 if_only_forward_pc = False 
 
 SCOUT_LENGTH = 2
@@ -47,7 +48,7 @@ def global_points_publish(input_points_cloud):
 
     msg = PointCloud2()
     msg.header.stamp = rospy.Time().now()
-    msg.header.frame_id = "/robot_0_tf/odom"
+    msg.header.frame_id = "/camera_init"
 
     if len(input_points_cloud.shape) == 3:
         msg.height = input_points_cloud.shape[1]
@@ -66,12 +67,12 @@ def global_points_publish(input_points_cloud):
     msg.is_dense = False
     msg.data = np.asarray(input_points_cloud, np.float32).tostring()
 
-    # pub_points_cloud.publish(msg)
+    pub_points_cloud.publish(msg)
 
-def down_sampling(points_cloud, voxel_size=1.5):
+def down_sampling(in_points_cloud, voxel_size=0.1):
     
     down_points_cloud = open3d.geometry.PointCloud()
-    down_points_cloud.points = open3d.utility.Vector3dVector(points_cloud)
+    down_points_cloud.points = open3d.utility.Vector3dVector(in_points_cloud)
     down_points_cloud = down_points_cloud.voxel_down_sample(voxel_size=voxel_size)
     
     return np.asarray(down_points_cloud.points)
@@ -93,8 +94,8 @@ def Lidar_Preprocess(lidar_data):
     lidar_data = lidar_data[range_mask] 
     
     height_mask = np.logical_and(
-                    lidar_data[:, 2] < 3,
-                    lidar_data[:, 2] > -0.6
+                    lidar_data[:, 2] < 0.5,#1.5
+                    lidar_data[:, 2] > -0.5#1.5
                     )
     lidar_data = lidar_data[height_mask]
     
@@ -106,11 +107,11 @@ def Lidar_Preprocess(lidar_data):
     lidar_data = lidar_data[ego_mask]
     
     # DownSampling
-    points, _ = down_sampling(lidar_data, None)
+    points = down_sampling(lidar_data)#, None
     lidar2robot = lidar_extrinsic_matrix
     lidar2world = robot2world.dot(lidar2robot)
 
-    points = (lidar2world.dot(points.T)).T
+    points = (lidar2world[:3,:3].dot(points.T).T+lidar2world[3,:3])
 
     return points
 
@@ -184,21 +185,28 @@ def callback_odom(data):
     current_vel[0] = np.linalg.norm(np.array([data.twist.twist.linear.x,data.twist.twist.linear.y])) 
     current_vel[1] = data.twist.twist.angular.z
         
+# def callback_subgoal(data):   
+#     global sub_goal 
+#     sub_goal[0] = data.pose.position.x 
+#     sub_goal[1] = data.pose.position.y 
+#     sub_goal[2] = calc_yaw(data.pose.orientation) 
+     
 def callback_subgoal(data):   
     ###recieve subgoal_s2c, transform into subgoal_s2w, and publish it.
-    global sub_goal,pub_subgoal_s2w,robot2world
+    global sub_goal,pub_subgoal_s2w,robot2world,subgoal2robot,subgoal2world,subgoal2camera
     subgoal2camera = np.identity(4)
 
     r3 = R.from_quat(np.array([data.pose.orientation.x,data.pose.orientation.y,data.pose.orientation.z,data.pose.orientation.w]))#subgoal2world
     subgoal2camera[:3,:3] = r3.as_matrix()
 
     subgoal2camera[:3,3] = np.array([data.pose.position.x,data.pose.position.y,data.pose.position.z])
-    subgoal2camera[:3,3] = subgoal2camera[:3,3] - subgoal2camera[:3,0] * track_distacne
+    # subgoal2camera[:3,3] = subgoal2camera[:3,3]# - subgoal2camera[:3,0] * track_distacne
     
     camera2robot = camera_extrinsic_matrix
-
-    camera2world = robot2world.dot(camera2robot)
-    subgoal2world = camera2world.dot(subgoal2camera)
+    subgoal2robot = camera2robot.dot(subgoal2camera)
+    subgoal2robot[:3,3] = subgoal2robot[:3,3] - subgoal2robot[:3,3]/np.linalg.norm(subgoal2robot[:3,3]) * track_distacne
+    subgoal2world = robot2world.dot(subgoal2robot)
+    # print("subgoal2robot:",subgoal2robot,"subgoal2world:",subgoal2world)
 
 
     sub_goal[0] = subgoal2world[0,3] 
@@ -207,10 +215,10 @@ def callback_subgoal(data):
     qua = r3.as_quat()# (x,
     msg = PoseStamped()
     msg.header.stamp = rospy.Time.now()
-    msg.header.frame_id = "/base2odometry"#
-    msg.pose.position.x = subgoal2camera[0,3]#subgoal2world
-    msg.pose.position.y = subgoal2camera[1,3]#subgoal2world
-    msg.pose.position.z = subgoal2camera[2,3]
+    msg.header.frame_id = "/camera_init"#
+    msg.pose.position.x = subgoal2world[0,3]#subgoal2world
+    msg.pose.position.y = subgoal2world[1,3]#subgoal2world
+    msg.pose.position.z = subgoal2world[2,3]
     
     msg.pose.orientation.x = qua[0]
     msg.pose.orientation.y = qua[1]
@@ -230,13 +238,13 @@ if __name__ == "__main__":
     # Configure depth and color streams
     rospy.init_node('real_dwa_planner', anonymous=True)
     # rospy.Subscriber('/robot_0/scan', LaserScan, callback_laser, queue_size=1)
-    rospy.Subscriber('/robot_0/odom', Odometry, callback_odom, queue_size=1)
+    rospy.Subscriber('/Odometry', Odometry, callback_odom, queue_size=1)
     rospy.Subscriber('/subgoal_s2c', PoseStamped, callback_subgoal, queue_size=1)
-    rospy.Subscriber('pointcloud_topic', PointCloud2, callback_obstacle_points, queue_size=1)
+    rospy.Subscriber('/os_cloud_node/points', PointCloud2, callback_obstacle_points, queue_size=1)
 
-    pub_cmd_vel = rospy.Publisher('/robot_0/cmd_vel', Twist, queue_size=10)
+    pub_cmd_vel = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
     # pub_tag_cmd_vel = rospy.Publisher('/robot_tag/cmd_vel', Twist, queue_size=10)
-    # pub_points_cloud = rospy.Publisher('pointcloud_topic', PointCloud2, queue_size=5)
+    pub_points_cloud = rospy.Publisher('/pointcloud_p2w', PointCloud2, queue_size=5)
     pub_subgoal_s2w = rospy.Publisher('/subgoal_s2w',PoseStamped, queue_size=10)
     
     cmd_vel_value = Twist()
@@ -246,6 +254,9 @@ if __name__ == "__main__":
     current_pose = [0,0,0]
     current_vel = [0,0]#v,w
     sub_goal = [0,0,0]
+    subgoal2robot = []
+    subgoal2world = []
+    subgoal2camera = []
 
 
 
@@ -253,15 +264,22 @@ if __name__ == "__main__":
     DWA_Planner.config(
             max_speed=SCOUT_MAX_VEL,#1
             max_yawrate=SCOUT_MAX_ANG_VEL,#np.radians(10.0)
-            base=SCOUT_WIDTH/2)#0.5
+            base=SCOUT_WIDTH*0.5)#0.5
     # rospy.spin()
-    rate = rospy.Rate(10)
-    points_cloud = []
+    rate = rospy.Rate(80)
+    points_cloud = np.array([])
+    points_cloud_p2w = []
+    dwa_obs_points = []
     #try:
     while not rospy.is_shutdown():
         # temp_points_cloud = np.ones((4,3))
         # global_points_publish(temp_points_cloud)
-        points_cloud_p2w = Lidar_Preprocess(points_cloud)
+        if points_cloud.shape[0]>0:
+
+            points_cloud_p2w = Lidar_Preprocess(points_cloud)
+            # print("points_cloud:",points_cloud_p2w.shape)
+            global_points_publish(points_cloud_p2w)
+            dwa_obs_points = points_cloud_p2w[:,:2]
         # import pdb;pdb.set_trace()
         # cmd_vel_value.linear.x = rospy.get_param("/turtlebot_teleop_keyboard/scale_linear")
         # cmd_vel_value.angular.z = rospy.get_param("/turtlebot_teleop_keyboard/scale_angular")
@@ -271,14 +289,16 @@ if __name__ == "__main__":
         if np.linalg.norm(np.array(current_pose[:2])-np.array(sub_goal[:2]))< adjust_heading_threshold: 
             kp = 0.1
             cmd_vel_value.linear.x,cmd_vel_value.angular.z = 0,0
-            cmd_vel_value.angular.z = kp*(sub_goal[2] - current_pose[2]) 
+            cmd_vel_value.angular.z =0# kp*(sub_goal[2] - current_pose[2]) 
         else:    
-            
-            vel_vector = DWA_Planner.planning(current_pose, current_vel, sub_goal[:2], points_cloud_p2w[:,:2])
-            cmd_vel_value.linear.x,cmd_vel_value.angular.z = vel_vector[0], vel_vector[1]
+            # print("dwa_obs_points",dwa_obs_points)
+            vel_vector = DWA_Planner.planning(current_pose, current_vel, sub_goal[:2], dwa_obs_points)
+            cmd_vel_value.linear.x,cmd_vel_value.angular.z = vel_vector[0]/3, vel_vector[1]/1.5
         pub_cmd_vel.publish(cmd_vel_value)
-        # print("sug_goal",sub_goal)
-        # print("cmd_vel_value",cmd_vel_value.linear.x,cmd_vel_value.angular.z)
+        print("sug_goal",sub_goal,"current_pose",current_pose)
+        # print("subgoal2robot:",subgoal2robot,"subgoal2camera:",subgoal2camera)
+        print("cmd_vel_value",cmd_vel_value.linear.x,cmd_vel_value.angular.z)
+        # sub_goal[:] = current_pose[:]
         # # print(points_cloud)
         # print("current_pose",current_pose,"current_vel",current_vel)
         rate.sleep()

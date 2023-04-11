@@ -10,10 +10,11 @@ from scipy.spatial.transform import Rotation as R
 
 #####param####
 extrinsic_matrix = np.array([[0,0,1,0],[-1,0,0,0],[0,-1,0,0],[0,0,0,1]]) #相机坐标系:z轴光轴,x右,y下
-cam_params = np.array([554.254691191187, 554.254691191187, 320.5, 240.5]) #fx, fy, cx, cy
+cam_params = np.array([385.45458984375, 321.5283203125, 385.1853332519531, 244.05418395996094])#fx, fy, cx, cy,realsense on 5g vehicle
+# cam_params = np.array([554.254691191187, 554.254691191187, 320.5, 240.5]) #fx, fy, cx, cy
 tag_len = 0.2#0.360
 tag_family = 'tag36h11'
-track_distacne = 0.3
+track_distacne = 2#0.3
 
 #####initialize####
 robot2world =  np.identity(4)
@@ -43,19 +44,20 @@ def aprilTag_pose_estimate(img):
             subgoal2camera[:3,0] =  obj2camera[:3,2]
             subgoal2camera[:3,1] =  -obj2camera[:3,0]
             subgoal2camera[:3,2] =  -obj2camera[:3,1]
-            subgoal2camera[:3,3] =  obj2camera[:3,3] - obj2camera[:3,2] * track_distacne
+            subgoal2camera[:3,3] =  obj2camera[:3,3] #- obj2camera[:3,2] * track_distacne
 
             obj2world = camera2world.dot(obj2camera)
             subgoal2world = camera2world.dot(subgoal2camera)
             print("subgoal2world:\n", subgoal2world)
             print("subgoal2camera:\n", subgoal2camera)
             print("obj2camera:\n", obj2camera)
-            print("subgoal2robot:\n", camera2robot.dot(obj2camera))
+            print("subgoal2robot:\n", camera2robot.dot(subgoal2camera))
 
             # subgoal2world = camera2robot.dot(subgoal2camera)
+            subgoal2world[:3,3] =  subgoal2world[:3,3]# - subgoal2world[:3,0] * track_distacne
             subgoal = PoseStamped()
             subgoal.header.stamp = rospy.Time.now()
-            subgoal.header.frame_id = "/base"#/base2odometry
+            subgoal.header.frame_id = "/camera_init"#/base2odometry
             subgoal.pose.position.x = subgoal2camera[0,3]#subgoal2world
             subgoal.pose.position.y = subgoal2camera[1,3]#subgoal2world
             subgoal.pose.position.z = subgoal2camera[2,3]#subgoal2world
@@ -116,8 +118,8 @@ def callback_odom(data):
 if __name__ == "__main__":
     # Configure depth and color streams
     rospy.init_node('tag_pose_estimate', anonymous=True)
-    rospy.Subscriber('/robot_0/camera/rgb/image_raw', Image, callback_img)    
-    rospy.Subscriber('/robot_0/odom', Odometry, callback_odom, queue_size=1)
+    rospy.Subscriber('/camera/color/image_raw', Image, callback_img)    
+    rospy.Subscriber('/Odometry', Odometry, callback_odom, queue_size=1)
     subgoal_pub = rospy.Publisher('/subgoal_s2c',PoseStamped, queue_size=10)
     rospy.spin()
     rate = rospy.Rate(1000)
