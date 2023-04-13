@@ -1,7 +1,8 @@
 import rospy
 import math
 import numpy as np
-import cv2
+#import cv2
+import time
 
 
 from sensor_msgs.msg import LaserScan
@@ -13,6 +14,7 @@ from sensor_msgs import point_cloud2
 from sensor_msgs.msg import PointField
 from dynamic_window_approch import DynamicWindowApproch
 import open3d
+from scipy.spatial.transform import Rotation as R
 ##global param
 lidar_extrinsic_matrix = np.identity(4)
 robot2world =  np.identity(4)
@@ -20,11 +22,12 @@ robot2world =  np.identity(4)
 adjust_heading_threshold = 0.2
 if_only_forward_pc = False 
 
+point_cloud_downsampling_voxel_size = 0.3
 SCOUT_LENGTH = 2
 SCOUT_WIDTH = 1
 SCOUT_MAX_VEL = 1
 SCOUT_MAX_ANG_VEL = 0.2
-FEASIBLE_REGION_RANGE_SCOUT = 8
+FEASIBLE_REGION_RANGE_SCOUT = 4#8#8
 ####
 
 def calc_yaw(orientation):
@@ -42,7 +45,7 @@ def global_points_publish(input_points_cloud):
 
     msg = PointCloud2()
     msg.header.stamp = rospy.Time().now()
-    msg.header.frame_id = "/camera_init"
+    msg.header.frame_id = "/robot_1/camera_init"
 
     if len(input_points_cloud.shape) == 3:
         msg.height = input_points_cloud.shape[1]
@@ -63,7 +66,7 @@ def global_points_publish(input_points_cloud):
 
     pub_points_cloud.publish(msg)
 
-def down_sampling(in_points_cloud, voxel_size=0.1):
+def down_sampling(in_points_cloud, voxel_size=1.5):
     
     down_points_cloud = open3d.geometry.PointCloud()
     down_points_cloud.points = open3d.utility.Vector3dVector(in_points_cloud)
@@ -78,7 +81,7 @@ def Lidar_Preprocess(lidar_data):
         # lidar_data = self.lidar_data
     range_mask = np.logical_and(
                     np.abs(lidar_data[:, 0]) < FEASIBLE_REGION_RANGE_SCOUT,
-                    np.abs(lidar_data[:, 1]) < FEASIBLE_REGION_RANGE_SCOUT
+                    np.abs(lidar_data[:, 1]) < FEASIBLE_REGION_RANGE_SCOUT/2
                     )
     if if_only_forward_pc:
         range_mask = np.logical_and(
@@ -89,7 +92,7 @@ def Lidar_Preprocess(lidar_data):
     
     height_mask = np.logical_and(
                     lidar_data[:, 2] < 0.5,#1.5
-                    lidar_data[:, 2] > -0.5#1.5
+                    lidar_data[:, 2] > -1.2#1.5
                     )
     lidar_data = lidar_data[height_mask]
     
@@ -101,13 +104,14 @@ def Lidar_Preprocess(lidar_data):
     lidar_data = lidar_data[ego_mask]
     
     # DownSampling
-    points = down_sampling(lidar_data)#, None
+    points = down_sampling(lidar_data,point_cloud_downsampling_voxel_size)#, None
     lidar2robot = lidar_extrinsic_matrix
     lidar2world = robot2world.dot(lidar2robot)
 
-    points = (lidar2world[:3,:3].dot(points.T).T+lidar2world[3,:3])
+    points = (lidar2world[:3,:3].dot(points.T).T+lidar2world[:3,3])
 
     return points
+    
 def callback_obstacle_points(msg):
     global points_cloud
     # temp = []
@@ -125,16 +129,16 @@ def callback_obstacle_points(msg):
 
 def callback_odom(data):    
     global current_pose,current_vel,robot2world
-    current_pose[0] = data.pose.pose.position.x
-    current_pose[1] = data.pose.pose.position.y
-    current_pose[2] = calc_yaw(data.pose.pose.orientation)
+    r3 = R.from_quat(np.array([data.pose.pose.orientation.x,data.pose.pose.orientation.y,data.pose.pose.orientation.z,data.pose.pose.orientation.w]))#subgoal2world
+    robot2world[:3,:3] = r3.as_matrix()
+    robot2world[:3,3] = np.array([data.pose.pose.position.x,data.pose.pose.position.y,data.pose.pose.position.z])
 
-    robot2world[:2,0] = np.array([np.cos(current_pose[2]),np.sin(current_pose[2])])
-    robot2world[:2,1] = np.array([-np.sin(current_pose[2]),np.cos(current_pose[2])])
-    robot2world[:2,3] = np.array(current_pose[:2])
+    # robot2world[:2,0] = np.array([np.cos(current_pose[2]),np.sin(current_pose[2])])
+    # robot2world[:2,1] = np.array([-np.sin(current_pose[2]),np.cos(current_pose[2])])
+    # robot2world[:2,3] = np.array(current_pose[:2])
     # current_pose_z = data.pose.pose.position.z
-    current_vel[0] = np.linalg.norm(np.array([data.twist.twist.linear.x,data.twist.twist.linear.y])) 
-    current_vel[1] = data.twist.twist.angular.z
+    # current_vel[0] = np.linalg.norm(np.array([data.twist.twist.linear.x,data.twist.twist.linear.y])) 
+    # current_vel[1] = data.twist.twist.angular.z
         
 
 
@@ -145,7 +149,7 @@ def callback_odom(data):
 if __name__ == "__main__":
     # Configure depth and color streams
     rospy.init_node('preprocess_pc', anonymous=True)
-    rospy.Subscriber('/Odometry', Odometry, callback_odom, queue_size=1)
+    rospy.Subscriber('/robot_1/Odometry', Odometry, callback_odom, queue_size=1)
     rospy.Subscriber('/os_cloud_node/points', PointCloud2, callback_obstacle_points, queue_size=1)
 
     pub_points_cloud = rospy.Publisher('/pointcloud_p2w', PointCloud2, queue_size=5)
@@ -155,12 +159,20 @@ if __name__ == "__main__":
     current_pose = [0,0,0]
     current_vel = [0,0]#v,w
     # rospy.spin()
-    rate = rospy.Rate(80)
+    rate = rospy.Rate(10)
     #try:
     while not rospy.is_shutdown():
         if points_cloud.shape[0]>0:
+            time1 = time.time()
             points_cloud_p2w = Lidar_Preprocess(points_cloud)
-            # print("points_cloud:",points_cloud_p2w.shape)
+            time2 = time.time()
+            print("preprocess pc time:",time2-time1)
+            
+            print("points_cloud:",points_cloud.shape,points_cloud_p2w.shape)
             global_points_publish(points_cloud_p2w)
+        else:
+            print("@@without original point_cloud!!")
+        
+        # points_cloud = np.array([])
 
         rate.sleep()

@@ -9,7 +9,7 @@ from geometry_msgs.msg import PoseStamped
 from scipy.spatial.transform import Rotation as R
 
 #####param####
-extrinsic_matrix = np.array([[0,0,1,0],[-1,0,0,0],[0,-1,0,0],[0,0,0,1]]) #相机坐标系:z轴光轴,x右,y下
+extrinsic_matrix = np.array([[0,0,1,-0.24],[-1,0,0,0.0061277],[0,-1,0,-0.112],[0,0,0,1]]) #相机坐标系:z轴光轴,x右,y下,
 cam_params = np.array([385.45458984375, 321.5283203125, 385.1853332519531, 244.05418395996094])#fx, fy, cx, cy,realsense on 5g vehicle
 # cam_params = np.array([554.254691191187, 554.254691191187, 320.5, 240.5]) #fx, fy, cx, cy
 tag_len = 0.2#0.360
@@ -57,7 +57,7 @@ def aprilTag_pose_estimate(img):
             subgoal2world[:3,3] =  subgoal2world[:3,3]# - subgoal2world[:3,0] * track_distacne
             subgoal = PoseStamped()
             subgoal.header.stamp = rospy.Time.now()
-            subgoal.header.frame_id = "/camera_init"#/base2odometry
+            subgoal.header.frame_id = "/robot_1/camera_init"#/base2odometry
             subgoal.pose.position.x = subgoal2camera[0,3]#subgoal2world
             subgoal.pose.position.y = subgoal2camera[1,3]#subgoal2world
             subgoal.pose.position.z = subgoal2camera[2,3]#subgoal2world
@@ -119,7 +119,7 @@ if __name__ == "__main__":
     # Configure depth and color streams
     rospy.init_node('tag_pose_estimate', anonymous=True)
     rospy.Subscriber('/camera/color/image_raw', Image, callback_img)    
-    rospy.Subscriber('/Odometry', Odometry, callback_odom, queue_size=1)
+    rospy.Subscriber('/robot_1/Odometry', Odometry, callback_odom, queue_size=1)
     subgoal_pub = rospy.Publisher('/subgoal_s2c',PoseStamped, queue_size=10)
     rospy.spin()
     rate = rospy.Rate(1000)

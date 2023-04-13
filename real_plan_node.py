@@ -1,8 +1,9 @@
 import rospy
 import math
 import numpy as np
-import cv2
+#import cv2
 import open3d
+import time
 
 
 from sensor_msgs.msg import LaserScan
@@ -17,7 +18,7 @@ from scipy.spatial.transform import Rotation as R
 
 ##global param
 track_distacne = 1
-camera_extrinsic_matrix = np.array([[0,0,1,0],[-1,0,0,0],[0,-1,0,0],[0,0,0,1]]) #相机坐标系:z轴光轴,x右,y下
+camera_extrinsic_matrix = np.array([[0,0,1,-0.24],[-1,0,0,0.0061277],[0,-1,0,-0.112],[0,0,0,1]]) #相机坐标系:z轴光轴,x右,y下
 lidar_extrinsic_matrix = np.identity(4)
 robot2world =  np.identity(4)
 
@@ -48,7 +49,7 @@ def global_points_publish(input_points_cloud):
 
     msg = PointCloud2()
     msg.header.stamp = rospy.Time().now()
-    msg.header.frame_id = "/camera_init"
+    msg.header.frame_id = "/robot_1/camera_init"
 
     if len(input_points_cloud.shape) == 3:
         msg.height = input_points_cloud.shape[1]
@@ -69,7 +70,7 @@ def global_points_publish(input_points_cloud):
 
     pub_points_cloud.publish(msg)
 
-def down_sampling(in_points_cloud, voxel_size=0.1):
+def down_sampling(in_points_cloud, voxel_size=1.5):
     
     down_points_cloud = open3d.geometry.PointCloud()
     down_points_cloud.points = open3d.utility.Vector3dVector(in_points_cloud)
@@ -95,7 +96,7 @@ def Lidar_Preprocess(lidar_data):
     
     height_mask = np.logical_and(
                     lidar_data[:, 2] < 0.5,#1.5
-                    lidar_data[:, 2] > -0.5#1.5
+                    lidar_data[:, 2] > -1#1.5
                     )
     lidar_data = lidar_data[height_mask]
     
@@ -215,7 +216,7 @@ def callback_subgoal(data):
     qua = r3.as_quat()# (x,
     msg = PoseStamped()
     msg.header.stamp = rospy.Time.now()
-    msg.header.frame_id = "/camera_init"#
+    msg.header.frame_id = "/robot_1/camera_init"#
     msg.pose.position.x = subgoal2world[0,3]#subgoal2world
     msg.pose.position.y = subgoal2world[1,3]#subgoal2world
     msg.pose.position.z = subgoal2world[2,3]
@@ -238,9 +239,9 @@ if __name__ == "__main__":
     # Configure depth and color streams
     rospy.init_node('real_dwa_planner', anonymous=True)
     # rospy.Subscriber('/robot_0/scan', LaserScan, callback_laser, queue_size=1)
-    rospy.Subscriber('/Odometry', Odometry, callback_odom, queue_size=1)
+    rospy.Subscriber('/robot_1/Odometry', Odometry, callback_odom, queue_size=1)
     rospy.Subscriber('/subgoal_s2c', PoseStamped, callback_subgoal, queue_size=1)
-    rospy.Subscriber('/os_cloud_node/points', PointCloud2, callback_obstacle_points, queue_size=1)
+    rospy.Subscriber('/pointcloud_p2w', PointCloud2, callback_obstacle_points, queue_size=1)#/os_cloud_node/points
 
     pub_cmd_vel = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
     # pub_tag_cmd_vel = rospy.Publisher('/robot_tag/cmd_vel', Twist, queue_size=10)
@@ -264,41 +265,49 @@ if __name__ == "__main__":
     DWA_Planner.config(
             max_speed=SCOUT_MAX_VEL,#1
             max_yawrate=SCOUT_MAX_ANG_VEL,#np.radians(10.0)
-            base=SCOUT_WIDTH*0.5)#0.5
+            base=SCOUT_WIDTH*0.6)#0.5
     # rospy.spin()
-    rate = rospy.Rate(80)
+    rate = rospy.Rate(10)
     points_cloud = np.array([])
     points_cloud_p2w = []
     dwa_obs_points = []
     #try:
     while not rospy.is_shutdown():
-        # temp_points_cloud = np.ones((4,3))
-        # global_points_publish(temp_points_cloud)
-        if points_cloud.shape[0]>0:
 
-            points_cloud_p2w = Lidar_Preprocess(points_cloud)
-            # print("points_cloud:",points_cloud_p2w.shape)
-            global_points_publish(points_cloud_p2w)
-            dwa_obs_points = points_cloud_p2w[:,:2]
-        # import pdb;pdb.set_trace()
-        # cmd_vel_value.linear.x = rospy.get_param("/turtlebot_teleop_keyboard/scale_linear")
-        # cmd_vel_value.angular.z = rospy.get_param("/turtlebot_teleop_keyboard/scale_angular")
-        # print("tag_current_vel",cmd_vel_value.linear.x,cmd_vel_value.angular.z)
-        # pub_tag_cmd_vel.publish(cmd_vel_value)
-        # vel_vector = [0.1,0.1]
-        if np.linalg.norm(np.array(current_pose[:2])-np.array(sub_goal[:2]))< adjust_heading_threshold: 
-            kp = 0.1
+        if points_cloud.shape[0]>0:
+            # time1 = time.time()
+            # points_cloud_p2w = Lidar_Preprocess(points_cloud)
+            # time2 = time.time()
+            print("points_cloud:",points_cloud.shape)
+            # print("preprocess pc time:",time2-time1,points_cloud_p2w.shape)
+            # global_points_publish(points_cloud_p2w)
+            dwa_obs_points = points_cloud.copy()
+
+            if np.linalg.norm(np.array(current_pose[:2])-np.array(sub_goal[:2]))< adjust_heading_threshold: 
+                kp = 0.1
+                cmd_vel_value.linear.x,cmd_vel_value.angular.z = 0,0
+                cmd_vel_value.angular.z =0# kp*(sub_goal[2] - current_pose[2]) 
+            else:    
+                # print("dwa_obs_points",dwa_obs_points)
+                time3 = time.time()
+                vel_vector = DWA_Planner.planning(current_pose, current_vel, sub_goal[:2], dwa_obs_points[:,:2])
+                time4 = time.time()
+                print("dwa time",time4-time3)
+                cmd_vel_value.linear.x,cmd_vel_value.angular.z = vel_vector[0]/2, vel_vector[1]
+        
+        else:#if haven't recive point_clouds, stop the vehicle
+            print("@@without preprocess_points_clouds, have to stop it!!")
             cmd_vel_value.linear.x,cmd_vel_value.angular.z = 0,0
-            cmd_vel_value.angular.z =0# kp*(sub_goal[2] - current_pose[2]) 
-        else:    
-            # print("dwa_obs_points",dwa_obs_points)
-            vel_vector = DWA_Planner.planning(current_pose, current_vel, sub_goal[:2], dwa_obs_points)
-            cmd_vel_value.linear.x,cmd_vel_value.angular.z = vel_vector[0]/3, vel_vector[1]/1.5
+        
         pub_cmd_vel.publish(cmd_vel_value)
         print("sug_goal",sub_goal,"current_pose",current_pose)
         # print("subgoal2robot:",subgoal2robot,"subgoal2camera:",subgoal2camera)
         print("cmd_vel_value",cmd_vel_value.linear.x,cmd_vel_value.angular.z)
+        
+        ###clear the last frame information
         # sub_goal[:] = current_pose[:]
+        # points_cloud = np.array([])
+        
         # # print(points_cloud)
         # print("current_pose",current_pose,"current_vel",current_vel)
         rate.sleep()
